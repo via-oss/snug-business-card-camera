@@ -1,0 +1,170 @@
+
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>sNug 名片拍攝</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: Arial, sans-serif;
+      background: #f4f6f8;
+      color: #263238;
+    }
+    .card {
+      max-width: 520px;
+      margin: 20px auto;
+      padding: 22px;
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 3px 16px #0001;
+    }
+    h2 { margin-top: 0; }
+    p { color: #667085; line-height: 1.6; }
+    video, canvas {
+      width: 100%;
+      border-radius: 12px;
+      background: #111;
+      margin-top: 12px;
+    }
+    button {
+      width: 100%;
+      border: 0;
+      border-radius: 10px;
+      padding: 15px;
+      margin-top: 12px;
+      font-size: 16px;
+      cursor: pointer;
+      background: #253b50;
+      color: white;
+    }
+    button.secondary { background: #e8edf2; color: #263238; }
+    button:disabled { opacity: .5; }
+    #message {
+      margin-top: 14px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h2>sNug 名片拍攝系統</h2>
+    <p>請將名片放平，保持光線充足，並讓名片完整進入畫面。</p>
+
+    <video id="video" autoplay playsinline hidden></video>
+
+    <button id="startBtn">開啟相機</button>
+    <button id="captureBtn" hidden>拍攝並傳送</button>
+    <button id="stopBtn" class="secondary" hidden>關閉相機</button>
+
+    <div id="message">請點擊「開啟相機」開始拍攝。</div>
+  </main>
+
+<script>
+const $ = id => document.getElementById(id);
+let stream = null;
+
+const params = new URLSearchParams(location.search);
+const returnOrigin = params.get("returnOrigin");
+
+const validOrigin = returnOrigin === "https://script.google.com" ||
+  (returnOrigin && /^https:\/\/[a-z0-9.-]+\.googleusercontent\.com$/.test(returnOrigin));
+
+function message(text) {
+  $("message").textContent = text;
+}
+
+async function startCamera() {
+  try {
+    if (!validOrigin || !window.opener || window.opener.closed) {
+      throw new Error("請從 sNug 名片資料庫開啟此相機頁面。");
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("目前瀏覽器不支援相機功能，請使用最新版 Chrome。");
+    }
+
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: { ideal: "environment" },
+        width: { ideal: 1920 }
+      }
+    });
+
+    $("video").srcObject = stream;
+    $("video").hidden = false;
+    await $("video").play();
+
+    $("startBtn").hidden = true;
+    $("captureBtn").hidden = false;
+    $("stopBtn").hidden = false;
+    message("相機已開啟，請將名片對準畫面。");
+
+  } catch (e) {
+    message("無法開啟相機：" + e.message);
+  }
+}
+
+function stopCamera() {
+  if (stream) {
+    stream.getTracks().forEach(track => track.stop());
+    stream = null;
+  }
+  $("video").srcObject = null;
+  $("video").hidden = true;
+  $("startBtn").hidden = false;
+  $("captureBtn").hidden = true;
+  $("stopBtn").hidden = true;
+}
+
+function capturePhoto() {
+  const video = $("video");
+  if (!video.videoWidth) {
+    message("相機尚未準備完成，請稍候再試。");
+    return;
+  }
+
+  const canvas = document.createElement("canvas");
+  const scale = Math.min(
+    1, 2400 / Math.max(video.videoWidth, video.videoHeight)
+  );
+
+  canvas.width = Math.round(video.videoWidth * scale);
+  canvas.height = Math.round(video.videoHeight * scale);
+
+  canvas.getContext("2d").drawImage(
+    video, 0, 0, canvas.width, canvas.height
+  );
+
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.88);
+
+  $("captureBtn").disabled = true;
+  message("照片已拍攝，正在傳送至名片資料庫……");
+
+  try {
+    window.opener.postMessage({
+      type: "SNUG_CARD_CAPTURE",
+      dataUrl: dataUrl
+    }, returnOrigin);
+
+    stopCamera();
+    message("照片已傳送！請返回名片資料庫查看 AI 辨識結果。");
+  } catch (e) {
+    $("captureBtn").disabled = false;
+    message("傳送失敗：" + e.message);
+  }
+}
+
+$("startBtn").addEventListener("click", startCamera);
+$("captureBtn").addEventListener("click", capturePhoto);
+$("stopBtn").addEventListener("click", stopCamera);
+
+window.addEventListener("pagehide", stopCamera);
+</script>
+</body>
+</html>
